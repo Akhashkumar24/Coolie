@@ -26,6 +26,55 @@ export class WindowHelper {
     this.appState = appState
   }
 
+  // Extract stealth settings to a separate method
+  private applyStealthSettings(): void {
+    if (!this.mainWindow || this.mainWindow.isDestroyed()) return
+
+    // Enhanced content protection - this should prevent screen capture
+    this.mainWindow.setContentProtection(true)
+    
+    // Additional privacy measures
+    if (process.platform === "darwin") {
+      this.mainWindow.setVisibleOnAllWorkspaces(true, {
+        visibleOnFullScreen: true,
+        skipTransformProcessType: true
+      })
+      this.mainWindow.setHiddenInMissionControl(true)
+      this.mainWindow.setAlwaysOnTop(true, "screen-saver") // Higher level than floating
+      
+      // macOS specific: Try to exclude from screen recording
+      try {
+        // This is a macOS specific flag that might help
+        const { nativeImage } = require('electron')
+        this.mainWindow.setIcon(nativeImage.createEmpty())
+      } catch (e) {
+        console.log("Could not set empty icon:", e)
+      }
+    }
+    
+    if (process.platform === "linux") {
+      // Linux-specific optimizations for stealth overlays
+      if (this.mainWindow.setHasShadow) {
+        this.mainWindow.setHasShadow(false)
+      }
+      this.mainWindow.setFocusable(false)
+    }
+    
+    if (process.platform === "win32") {
+      // Windows-specific settings
+      this.mainWindow.setSkipTaskbar(true)
+      // Try to set window as a tool window (not captured in some scenarios)
+      try {
+        this.mainWindow.setParentWindow(null)
+      } catch (e) {
+        console.log("Could not set parent window:", e)
+      }
+    }
+    
+    this.mainWindow.setSkipTaskbar(true)
+    this.mainWindow.setAlwaysOnTop(true)
+  }
+
   public setWindowDimensions(width: number, height: number): void {
     if (!this.mainWindow || this.mainWindow.isDestroyed()) return
 
@@ -56,6 +105,9 @@ export class WindowHelper {
       width: newWidth,
       height: newHeight
     })
+
+    // IMPORTANT FIX: Re-apply stealth settings after dimension changes
+    this.applyStealthSettings()
 
     // Update internal state
     this.windowPosition = { x: newX, y: currentY }
@@ -105,49 +157,8 @@ export class WindowHelper {
     this.mainWindow = new BrowserWindow(windowSettings)
     // this.mainWindow.webContents.openDevTools()
     
-    // Enhanced content protection - this should prevent screen capture
-    this.mainWindow.setContentProtection(true)
-    
-    // Additional privacy measures
-    if (process.platform === "darwin") {
-      this.mainWindow.setVisibleOnAllWorkspaces(true, {
-        visibleOnFullScreen: true,
-        skipTransformProcessType: true
-      })
-      this.mainWindow.setHiddenInMissionControl(true)
-      this.mainWindow.setAlwaysOnTop(true, "screen-saver") // Higher level than floating
-      
-      // macOS specific: Try to exclude from screen recording
-      try {
-        // This is a macOS specific flag that might help
-        const { nativeImage } = require('electron')
-        this.mainWindow.setIcon(nativeImage.createEmpty())
-      } catch (e) {
-        console.log("Could not set empty icon:", e)
-      }
-    }
-    
-    if (process.platform === "linux") {
-      // Linux-specific optimizations for stealth overlays
-      if (this.mainWindow.setHasShadow) {
-        this.mainWindow.setHasShadow(false)
-      }
-      this.mainWindow.setFocusable(false)
-    }
-    
-    if (process.platform === "win32") {
-      // Windows-specific settings
-      this.mainWindow.setSkipTaskbar(true)
-      // Try to set window as a tool window (not captured in some scenarios)
-      try {
-        this.mainWindow.setParentWindow(null)
-      } catch (e) {
-        console.log("Could not set parent window:", e)
-      }
-    }
-    
-    this.mainWindow.setSkipTaskbar(true)
-    this.mainWindow.setAlwaysOnTop(true)
+    // Apply stealth settings
+    this.applyStealthSettings()
 
     // Try to hide from screen capture by setting various properties
     this.mainWindow.webContents.on('dom-ready', () => {
@@ -194,6 +205,8 @@ export class WindowHelper {
       if (this.mainWindow) {
         const bounds = this.mainWindow.getBounds()
         this.windowSize = { width: bounds.width, height: bounds.height }
+        // Re-apply stealth settings after resize
+        this.applyStealthSettings()
       }
     })
 
@@ -242,6 +255,9 @@ export class WindowHelper {
     }
 
     this.mainWindow.showInactive()
+
+    // Re-apply stealth settings when showing the window
+    this.applyStealthSettings()
 
     this.isWindowVisible = true
   }
