@@ -1,4 +1,3 @@
-
 import { BrowserWindow, screen } from "electron"
 import { AppState } from "main"
 import path from "node:path"
@@ -93,29 +92,77 @@ export class WindowHelper {
       fullscreenable: false,
       hasShadow: false,
       backgroundColor: "#00000000",
-      focusable: true
+      focusable: true,
+      // Additional privacy settings
+      skipTaskbar: true,
+      kiosk: false,
+      minimizable: false,
+      maximizable: false,
+      resizable: false,
+      movable: true
     }
 
     this.mainWindow = new BrowserWindow(windowSettings)
     // this.mainWindow.webContents.openDevTools()
+    
+    // Enhanced content protection - this should prevent screen capture
     this.mainWindow.setContentProtection(true)
-
+    
+    // Additional privacy measures
     if (process.platform === "darwin") {
       this.mainWindow.setVisibleOnAllWorkspaces(true, {
-        visibleOnFullScreen: true
+        visibleOnFullScreen: true,
+        skipTransformProcessType: true
       })
       this.mainWindow.setHiddenInMissionControl(true)
-      this.mainWindow.setAlwaysOnTop(true, "floating")
+      this.mainWindow.setAlwaysOnTop(true, "screen-saver") // Higher level than floating
+      
+      // macOS specific: Try to exclude from screen recording
+      try {
+        // This is a macOS specific flag that might help
+        const { nativeImage } = require('electron')
+        this.mainWindow.setIcon(nativeImage.createEmpty())
+      } catch (e) {
+        console.log("Could not set empty icon:", e)
+      }
     }
+    
     if (process.platform === "linux") {
       // Linux-specific optimizations for stealth overlays
       if (this.mainWindow.setHasShadow) {
         this.mainWindow.setHasShadow(false)
       }
       this.mainWindow.setFocusable(false)
-    } 
+    }
+    
+    if (process.platform === "win32") {
+      // Windows-specific settings
+      this.mainWindow.setSkipTaskbar(true)
+      // Try to set window as a tool window (not captured in some scenarios)
+      try {
+        this.mainWindow.setParentWindow(null)
+      } catch (e) {
+        console.log("Could not set parent window:", e)
+      }
+    }
+    
     this.mainWindow.setSkipTaskbar(true)
     this.mainWindow.setAlwaysOnTop(true)
+
+    // Try to hide from screen capture by setting various properties
+    this.mainWindow.webContents.on('dom-ready', () => {
+      // Inject CSS to potentially hide from screen capture
+      this.mainWindow?.webContents.insertCSS(`
+        body {
+          -webkit-app-region: no-drag;
+          background: transparent !important;
+        }
+        * {
+          -webkit-user-select: none;
+          user-select: none;
+        }
+      `)
+    })
 
     this.mainWindow.loadURL(startUrl).catch((err) => {
       console.error("Failed to load URL:", err)
