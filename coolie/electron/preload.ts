@@ -1,3 +1,4 @@
+// electron/preload.ts
 import { contextBridge, ipcRenderer } from "electron"
 
 // Types for the exposed Electron API
@@ -22,12 +23,23 @@ interface ElectronAPI {
   onProcessingNoScreenshots: (callback: () => void) => () => void
   onProblemExtracted: (callback: (data: any) => void) => () => void
   onSolutionSuccess: (callback: (data: any) => void) => () => void
-
   onUnauthorized: (callback: () => void) => () => void
   onDebugError: (callback: (error: string) => void) => () => void
   takeScreenshot: () => Promise<void>
   moveWindowLeft: () => Promise<void>
   moveWindowRight: () => Promise<void>
+  
+  // Audio recording APIs
+  startAudioRecording: (deviceId?: string) => Promise<{ success: boolean; error?: string }>
+  stopAudioRecording: () => Promise<{ success: boolean; result?: string; error?: string }>
+  getAudioRecordingStatus: () => Promise<{ isRecording: boolean; error?: string }>
+  getAudioDevices: () => Promise<{ success: boolean; devices?: any[]; error?: string }>
+  onAudioRecordingStart: (callback: () => void) => () => void
+  onAudioRecordingStop: (callback: () => void) => () => void
+  onAudioTranscriptionReady: (callback: (data: { text: string; filePath: string; timestamp: number }) => void) => () => void
+  onMeetingAudioStarted: (callback: () => void) => () => void
+  
+  // Existing audio APIs
   analyzeAudioFromBase64: (data: string, mimeType: string) => Promise<{ text: string; timestamp: number }>
   analyzeAudioFile: (path: string) => Promise<{ text: string; timestamp: number }>
   analyzeImageFile: (path: string) => Promise<void>
@@ -48,7 +60,12 @@ export const PROCESSING_EVENTS = {
   //states for processing the debugging
   DEBUG_START: "debug-start",
   DEBUG_SUCCESS: "debug-success",
-  DEBUG_ERROR: "debug-error"
+  DEBUG_ERROR: "debug-error",
+
+  // Audio recording events
+  AUDIO_RECORDING_START: "audio-recording-start",
+  AUDIO_RECORDING_STOP: "audio-recording-stop",
+  AUDIO_TRANSCRIPTION_READY: "audio-transcription-ready"
 } as const
 
 // Expose the Electron API to the renderer process
@@ -59,6 +76,16 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getScreenshots: () => ipcRenderer.invoke("get-screenshots"),
   deleteScreenshot: (path: string) =>
     ipcRenderer.invoke("delete-screenshot", path),
+
+  // Audio recording methods
+  startAudioRecording: (deviceId?: string) =>
+    ipcRenderer.invoke("start-audio-recording", deviceId),
+  stopAudioRecording: () =>
+    ipcRenderer.invoke("stop-audio-recording"),
+  getAudioRecordingStatus: () =>
+    ipcRenderer.invoke("get-audio-recording-status"),
+  getAudioDevices: () =>
+    ipcRenderer.invoke("get-audio-devices"),
 
   // Event listeners
   onScreenshotTaken: (
@@ -71,6 +98,40 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.removeListener("screenshot-taken", subscription)
     }
   },
+
+  // Audio event listeners
+  onAudioRecordingStart: (callback: () => void) => {
+    const subscription = () => callback()
+    ipcRenderer.on(PROCESSING_EVENTS.AUDIO_RECORDING_START, subscription)
+    return () => {
+      ipcRenderer.removeListener(PROCESSING_EVENTS.AUDIO_RECORDING_START, subscription)
+    }
+  },
+
+  onAudioRecordingStop: (callback: () => void) => {
+    const subscription = () => callback()
+    ipcRenderer.on(PROCESSING_EVENTS.AUDIO_RECORDING_STOP, subscription)
+    return () => {
+      ipcRenderer.removeListener(PROCESSING_EVENTS.AUDIO_RECORDING_STOP, subscription)
+    }
+  },
+
+  onAudioTranscriptionReady: (callback: (data: { text: string; filePath: string; timestamp: number }) => void) => {
+    const subscription = (_: any, data: { text: string; filePath: string; timestamp: number }) => callback(data)
+    ipcRenderer.on(PROCESSING_EVENTS.AUDIO_TRANSCRIPTION_READY, subscription)
+    return () => {
+      ipcRenderer.removeListener(PROCESSING_EVENTS.AUDIO_TRANSCRIPTION_READY, subscription)
+    }
+  },
+
+  onMeetingAudioStarted: (callback: () => void) => {
+    const subscription = () => callback()
+    ipcRenderer.on("meeting-audio-started", subscription)
+    return () => {
+      ipcRenderer.removeListener("meeting-audio-started", subscription)
+    }
+  },
+
   onSolutionsReady: (callback: (solutions: string) => void) => {
     const subscription = (_: any, solutions: string) => callback(solutions)
     ipcRenderer.on("solutions-ready", subscription)
