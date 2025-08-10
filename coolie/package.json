@@ -29,7 +29,9 @@
         "dmg",
         "zip"
       ],
-      "icon": "assets/icons/mac/icon.icns"
+      "icon": "assets/icons/mac/icon.icns",
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
     },
     "win": {
       "target": [
