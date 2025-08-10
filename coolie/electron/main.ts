@@ -1,9 +1,11 @@
+// electron/main.ts
 import { app, BrowserWindow } from "electron"
 import { initializeIpcHandlers } from "./ipcHandlers"
 import { WindowHelper } from "./WindowHelper"
 import { ScreenshotHelper } from "./ScreenshotHelper"
 import { ShortcutsHelper } from "./shortcuts"
 import { ProcessingHelper } from "./ProcessingHelper"
+import { AudioCapture } from "./AudioCapture"
 
 export class AppState {
   private static instance: AppState | null = null
@@ -12,6 +14,7 @@ export class AppState {
   private screenshotHelper: ScreenshotHelper
   public shortcutsHelper: ShortcutsHelper
   public processingHelper: ProcessingHelper
+  public audioCapture: AudioCapture
 
   // View management
   private view: "queue" | "solutions" = "queue"
@@ -25,6 +28,7 @@ export class AppState {
   } | null = null // Allow null
 
   private hasDebugged: boolean = false
+  private isAudioRecording: boolean = false
 
   // Processing events
   public readonly PROCESSING_EVENTS = {
@@ -41,7 +45,12 @@ export class AppState {
     //states for processing the debugging
     DEBUG_START: "debug-start",
     DEBUG_SUCCESS: "debug-success",
-    DEBUG_ERROR: "debug-error"
+    DEBUG_ERROR: "debug-error",
+
+    // Audio recording events
+    AUDIO_RECORDING_START: "audio-recording-start",
+    AUDIO_RECORDING_STOP: "audio-recording-stop",
+    AUDIO_TRANSCRIPTION_READY: "audio-transcription-ready"
   } as const
 
   constructor() {
@@ -56,6 +65,9 @@ export class AppState {
 
     // Initialize ShortcutsHelper
     this.shortcutsHelper = new ShortcutsHelper(this)
+
+    // Initialize AudioCapture
+    this.audioCapture = new AudioCapture()
   }
 
   public static getInstance(): AppState {
@@ -103,6 +115,86 @@ export class AppState {
     return this.screenshotHelper.getExtraScreenshotQueue()
   }
 
+  // Audio recording methods
+  public async startAudioRecording(deviceId?: string): Promise<boolean> {
+    try {
+      if (this.isAudioRecording) {
+        console.warn('Audio recording already in progress')
+        return false
+      }
+
+      const result = await this.audioCapture.startMixedRecording(deviceId)
+      if (result) {
+        this.isAudioRecording = true
+        const mainWindow = this.getMainWindow()
+        if (mainWindow) {
+          mainWindow.webContents.send(this.PROCESSING_EVENTS.AUDIO_RECORDING_START)
+        }
+        return true
+      }
+      return false
+    } catch (error) {
+      console.error('Error starting audio recording:', error)
+      return false
+    }
+  }
+
+  public async stopAudioRecording(): Promise<string | null> {
+    try {
+      if (!this.isAudioRecording) {
+        console.warn('No audio recording in progress')
+        return null
+      }
+
+      this.audioCapture.stopRecording()
+      this.isAudioRecording = false
+
+      const mainWindow = this.getMainWindow()
+      if (mainWindow) {
+        mainWindow.webContents.send(this.PROCESSING_EVENTS.AUDIO_RECORDING_STOP)
+      }
+
+      // Wait a bit for the recording to be saved
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      
+      const recordingPath = this.audioCapture.getLatestRecording()
+      if (recordingPath) {
+        // Process the audio to text
+        try {
+          const transcription = await this.processingHelper.processAudioFile(recordingPath)
+          if (mainWindow) {
+            mainWindow.webContents.send(this.PROCESSING_EVENTS.AUDIO_TRANSCRIPTION_READY, {
+              text: transcription.text,
+              filePath: recordingPath,
+              timestamp: transcription.timestamp
+            })
+          }
+          return transcription.text
+        } catch (transcriptionError) {
+          console.error('Error transcribing audio:', transcriptionError)
+        }
+      }
+
+      return recordingPath
+    } catch (error) {
+      console.error('Error stopping audio recording:', error)
+      return null
+    }
+  }
+
+  public getIsAudioRecording(): boolean {
+    return this.isAudioRecording
+  }
+
+  public async getAudioDevices(): Promise<any[]> {
+    try {
+      return await this.audioCapture.getAudioDevices()
+    } catch (error) {
+      console.error('Error getting audio devices:', error)
+      return []
+    }
+  }
+
   // Window management methods
   public createWindow(): void {
     this.windowHelper.createWindow()
@@ -121,7 +213,9 @@ export class AppState {
       "Screenshots: ",
       this.screenshotHelper.getScreenshotQueue().length,
       "Extra screenshots: ",
-      this.screenshotHelper.getExtraScreenshotQueue().length
+      this.screenshotHelper.getExtraScreenshotQueue().length,
+      "Audio recording: ",
+      this.isAudioRecording
     )
     this.windowHelper.toggleMainWindow()
   }
@@ -135,6 +229,11 @@ export class AppState {
 
     // Clear problem info
     this.problemInfo = null
+
+    // Stop any ongoing audio recording
+    if (this.isAudioRecording) {
+      this.stopAudioRecording()
+    }
 
     // Reset view to initial state
     this.setView("queue")
@@ -198,6 +297,9 @@ async function initializeApp() {
     appState.createWindow()
     // Register global shortcuts using ShortcutsHelper
     appState.shortcutsHelper.registerGlobalShortcuts()
+
+    // Clean up old audio recordings on startup
+    appState.audioCapture.cleanupOldRecordings()
   })
 
   app.on("activate", () => {
@@ -209,6 +311,11 @@ async function initializeApp() {
 
   // Quit when all windows are closed, except on macOS
   app.on("window-all-closed", () => {
+    // Stop any ongoing recordings before quitting
+    if (appState.getIsAudioRecording()) {
+      appState.stopAudioRecording()
+    }
+    
     if (process.platform !== "darwin") {
       app.quit()
     }
