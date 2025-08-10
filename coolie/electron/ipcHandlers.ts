@@ -1,4 +1,4 @@
-// ipcHandlers.ts
+// electron/ipcHandlers.ts
 
 import { ipcMain, app } from "electron"
 import { AppState } from "./main"
@@ -70,6 +70,48 @@ export function initializeIpcHandlers(appState: AppState): void {
     }
   })
 
+  // Audio recording IPC handlers
+  ipcMain.handle("start-audio-recording", async (event, deviceId?: string) => {
+    try {
+      console.log("Starting audio recording with device:", deviceId)
+      const result = await appState.startAudioRecording(deviceId)
+      return { success: result }
+    } catch (error: any) {
+      console.error("Error in start-audio-recording handler:", error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle("stop-audio-recording", async () => {
+    try {
+      console.log("Stopping audio recording")
+      const result = await appState.stopAudioRecording()
+      return { success: true, result }
+    } catch (error: any) {
+      console.error("Error in stop-audio-recording handler:", error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle("get-audio-recording-status", async () => {
+    try {
+      return { isRecording: appState.getIsAudioRecording() }
+    } catch (error: any) {
+      console.error("Error in get-audio-recording-status handler:", error)
+      return { isRecording: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle("get-audio-devices", async () => {
+    try {
+      const devices = await appState.getAudioDevices()
+      return { success: true, devices }
+    } catch (error: any) {
+      console.error("Error in get-audio-devices handler:", error)
+      return { success: false, error: error.message }
+    }
+  })
+
   // IPC handler for analyzing audio from base64 data
   ipcMain.handle("analyze-audio-base64", async (event, data: string, mimeType: string) => {
     try {
@@ -104,6 +146,10 @@ export function initializeIpcHandlers(appState: AppState): void {
   })
 
   ipcMain.handle("quit-app", () => {
+    // Stop any ongoing audio recording before quitting
+    if (appState.getIsAudioRecording()) {
+      appState.stopAudioRecording()
+    }
     app.quit()
   })
 }
