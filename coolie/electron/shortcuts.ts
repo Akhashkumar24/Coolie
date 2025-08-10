@@ -1,5 +1,6 @@
+// electron/shortcuts.ts
 import { globalShortcut, app } from "electron"
-import { AppState } from "./main" // Adjust the import path if necessary
+import { AppState } from "./main"
 
 export class ShortcutsHelper {
   private appState: AppState
@@ -30,6 +31,40 @@ export class ShortcutsHelper {
       await this.appState.processingHelper.processScreenshots()
     })
 
+    // Audio recording shortcuts
+    globalShortcut.register("CommandOrControl+Shift+A", async () => {
+      const isRecording = this.appState.getIsAudioRecording()
+      const mainWindow = this.appState.getMainWindow()
+      
+      if (isRecording) {
+        console.log("Stopping audio recording via shortcut...")
+        const result = await this.appState.stopAudioRecording()
+        if (mainWindow) {
+          mainWindow.webContents.send("audio-recording-stopped", { result })
+        }
+      } else {
+        console.log("Starting audio recording via shortcut...")
+        const success = await this.appState.startAudioRecording()
+        if (mainWindow) {
+          mainWindow.webContents.send("audio-recording-started", { success })
+        }
+      }
+    })
+
+    // Quick audio recording toggle (for interviews)
+    globalShortcut.register("CommandOrControl+Shift+M", async () => {
+      const isRecording = this.appState.getIsAudioRecording()
+      const mainWindow = this.appState.getMainWindow()
+      
+      if (!isRecording) {
+        console.log("Quick start audio recording for meeting...")
+        const success = await this.appState.startAudioRecording()
+        if (success && mainWindow) {
+          mainWindow.webContents.send("meeting-audio-started")
+        }
+      }
+    })
+
     globalShortcut.register("CommandOrControl+R", () => {
       console.log(
         "Command + R pressed. Canceling requests and resetting queues..."
@@ -37,6 +72,11 @@ export class ShortcutsHelper {
 
       // Cancel ongoing API requests
       this.appState.processingHelper.cancelOngoingRequests()
+
+      // Stop any ongoing audio recording
+      if (this.appState.getIsAudioRecording()) {
+        this.appState.stopAudioRecording()
+      }
 
       // Clear both screenshot queues
       this.appState.clearQueues()
